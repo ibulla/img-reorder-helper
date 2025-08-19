@@ -1,8 +1,3 @@
-Got it 👍 thanks for clarifying! Since your tool is just an **HTML file with embedded JS**, the README should be much simpler — no `npm install` or command line stuff, just “copy it to your server or open in browser.” Here’s the corrected version:
-
----
-
-````markdown
 # Image Tag Reorder Helper
 
 A lightweight HTML+JS helper to reorder `<img>` tags effortlessly—take your image collections from static clutter to curated clarity.
@@ -55,5 +50,3 @@ After reordering →
 ## Why It Matters
 
 It’s more than a helper script—it’s a symbol of how AI can shift our creative workflows. The fewer barriers between an idea and its realization, the more we’re able to create, reflect, and share.
-
-```
