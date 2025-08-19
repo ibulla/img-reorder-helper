@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Image Tag Reorderer — Simple List</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <style>
+    body{background:#f7f7fb}
+    .app{padding:1.25rem}
+    .panel-box{background:#fff;border-radius:14px;box-shadow:0 10px 25px rgba(10,10,10,.06)}
+    .panel-head{padding:1rem 1.25rem;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
+    .panel-body{padding:1.25rem}
+    .is-mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    textarea.is-code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:.9rem}
+
+    /* Sortable list */
+    .list{display:flex;flex-direction:column;gap:10px}
+    .row{display:grid;grid-template-columns: 32px 64px 1fr auto;gap:10px;align-items:center;padding:8px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa}
+    .row[draggable="true"]{cursor:grab}
+    .row.dragging{opacity:.6}
+    .handle{font-size:18px;line-height:1;text-align:center;color:#6b7280}
+    .thumb{width:64px;height:64px;border-radius:8px;object-fit:contain;background:#fff;border:1px solid #e5e7eb}
+    .meta{font-size:.8rem;color:#555;word-break:break-all}
+    .actions .button{margin-left:.25rem}
+
+    .drop-hint{outline:2px solid #00d1b2}
+    .help{color:#6b7280}
+  </style>
+</head>
+<body>
+  <section class="app">
+    <h1 class="title is-3">🧩 Image Tag Reorderer <span class="subtitle is-5">— Simple list</span></h1>
+    <p class="help">Paste your <code>&lt;img&gt;</code> tags below. Click <em>Load</em> to build a draggable list. Reorder by drag & drop or with ⬆️/⬇️. The textarea above always mirrors the current order — copy it back to TinyMCE. ✨</p>
+
+    <!-- ONE PANE: import/copy area -->
+    <div class="panel-box" style="margin-bottom:1rem;">
+      <div class="panel-head">
+        <strong>HTML &lt;img&gt; list</strong>
+        <div class="buttons are-small">
+          <button id="btnLoad" class="button is-link is-light" title="Parse & render list">Load</button>
+          <button id="btnCopy" class="button is-primary" title="Copy current HTML">Copy HTML</button>
+          <button id="btnExport" class="button is-link" title="Download HTML file">Download</button>
+          <button id="btnClear" class="button is-light" title="Clear">Clear</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <textarea id="tagsText" class="textarea is-code" rows="10" placeholder="Paste a list of &lt;img ...&gt; tags here. Other markup is OK; we only extract &lt;img&gt;."></textarea>
+      </div>
+    </div>
+
+    <!-- Sortable list -->
+    <div class="panel-box">
+      <div class="panel-head">
+        <strong>Drag to reorder (one item per line)</strong>
+        <div class="buttons are-small">
+          <button id="btnSelectAll" class="button is-light">Select all HTML</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div id="list" class="list" aria-live="polite"></div>
+        <p id="emptyState" class="has-text-centered help" style="margin-top:1rem;">Nothing yet. Paste HTML above and click <em>Load</em>.</p>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const $ = (s, r=document)=>r.querySelector(s); const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+    const state = { items: [] }; // { html, src, alt }
+    const tagsText = $('#tagsText');
+    const list = $('#list');
+
+    function parseImgsFromHTML(html){
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div id="wrap">${html}</div>`, 'text/html');
+      const imgs = doc.querySelectorAll('#wrap img');
+      return Array.from(imgs).map(img=>({
+        html: img.cloneNode(false).outerHTML,
+        src: img.getAttribute('src')||'',
+        alt: img.getAttribute('alt')||''
+      }));
+    }
+
+    function syncTextarea(){
+      tagsText.value = state.items.map(x=>x.html).join('');
+      try{ localStorage.setItem('imgReorderer_html', tagsText.value); }catch(e){}
+    }
+
+    function renderList(){
+      list.innerHTML = '';
+      state.items.forEach((it, idx)=>{
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.setAttribute('draggable','true');
+        row.dataset.index = idx;
+        row.dataset.html = it.html;
+
+        const handle = document.createElement('div');
+        handle.className='handle';
+        handle.textContent='⋮⋮';
+
+        const img = document.createElement('img');
+        img.className='thumb'; img.src = it.src; img.alt = it.alt;
+
+        const meta = document.createElement('div');
+        meta.className='meta';
+        meta.textContent = it.alt || it.src.split('/').pop();
+
+        const actions = document.createElement('div');
+        actions.className='actions';
+        actions.innerHTML = `
+          <button class="button is-small" data-act="up" title="Move up">⬆️</button>
+          <button class="button is-small" data-act="down" title="Move down">⬇️</button>
+          <button class="button is-small is-light" data-act="open" title="Open">🔗</button>
+          <button class="button is-small is-light" data-act="remove" title="Remove">✖</button>
+        `;
+
+        row.appendChild(handle); row.appendChild(img); row.appendChild(meta); row.appendChild(actions);
+        list.appendChild(row);
+      });
+      $('#emptyState').style.display = state.items.length? 'none' : '';
+      syncTextarea();
+      attachDnD();
+    }
+
+    function buildFromTextarea(){ state.items = parseImgsFromHTML(tagsText.value); renderList(); }
+
+    function moveIndex(oldIdx, newIdx){
+      if(newIdx<0 || newIdx>=state.items.length) return;
+      const [it] = state.items.splice(oldIdx,1);
+      state.items.splice(newIdx,0,it);
+      renderList();
+    }
+
+    function attachDnD(){
+      $$('.row', list).forEach(row=>{
+        row.addEventListener('dragstart', (e)=>{ row.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+        row.addEventListener('dragend', ()=> row.classList.remove('dragging'));
+      });
+
+      list.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        const dragging = $('.row.dragging'); if(!dragging) return;
+        const after = getAfterElement(list, e.clientY);
+        if(after==null){ list.appendChild(dragging); } else { list.insertBefore(dragging, after); }
+        list.classList.add('drop-hint');
+      });
+
+      list.addEventListener('drop', ()=>{
+        list.classList.remove('drop-hint');
+        const newOrder = $$('.row', list).map(el=>el.dataset.html);
+        state.items = newOrder.map(h=> parseImgsFromHTML(h)[0] || {html:h, src:'', alt:''});
+        syncTextarea();
+      });
+
+      list.addEventListener('click', (e)=>{
+        const btn = e.target.closest('[data-act]'); if(!btn) return;
+        const row = e.target.closest('.row');
+        const idx = $$('.row', list).indexOf(row);
+        const act = btn.dataset.act;
+        if(act==='remove'){ state.items.splice(idx,1); renderList(); }
+        if(act==='open'){ const it = state.items[idx]; if(it?.src) window.open(it.src,'_blank'); }
+        if(act==='up'){ moveIndex(idx, idx-1); }
+        if(act==='down'){ moveIndex(idx, idx+1); }
+      });
+    }
+
+    function getAfterElement(container, y){
+      const els = [...container.querySelectorAll('.row:not(.dragging)')];
+      return els.reduce((closest, child)=>{
+        const box = child.getBoundingClientRect();
+        const offset = y - (box.top + box.height/2);
+        if(offset < 0 && offset > closest.offset){ return {offset, element: child}; }
+        else { return closest; }
+      }, {offset: Number.NEGATIVE_INFINITY}).element;
+    }
+
+    function copyToClipboard(text){
+      navigator.clipboard.writeText(text).catch(()=>{
+        const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove();
+      });
+    }
+
+    function downloadHTML(filename, content){
+      const blob = new Blob([content], {type:'text/html;charset=utf-8'});
+      const url = URL.createObjectURL(blob); const a=document.createElement('a');
+      a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    // Controls
+    $('#btnLoad').addEventListener('click', buildFromTextarea);
+    $('#btnCopy').addEventListener('click', ()=> copyToClipboard(tagsText.value));
+    $('#btnExport').addEventListener('click', ()=> downloadHTML('images-reordered.html', tagsText.value.trim()));
+    $('#btnClear').addEventListener('click', ()=>{ state.items=[]; tagsText.value=''; renderList(); });
+    $('#btnSelectAll').addEventListener('click', ()=>{ tagsText.focus(); tagsText.select(); });
+
+    // Persistence
+    (function init(){
+      try{ const v=localStorage.getItem('imgReorderer_html'); if(v) tagsText.value=v; }catch(e){}
+      if(tagsText.value.trim()){ buildFromTextarea(); }
+    })();
+  </script>
+</body>
+</html>
